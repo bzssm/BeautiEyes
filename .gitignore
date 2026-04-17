@@ -1,0 +1,52 @@
+# Gradle
+.gradle/
+build/
+/build
+/app/build/
+!gradle-wrapper.jar
+
+# Android Studio / IntelliJ
+*.iml
+.idea/
+
+
+# 本地配置（包含 SDK 路径等敏感信息）
+local.properties
+/local.properties
+
+# 构建产物
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Keystore / 签名文件（敏感，不应提交）
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# 原生构建
+.externalNativeBuild/
+.cxx/
+
+# 日志 / 崩溃文件
+*.log
+hs_err_pid*
+*.hprof
+
+# Profiling / Captures
+/captures
+*.profraw
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 编辑器临时文件
+*.swp
+*~
+.vscode/

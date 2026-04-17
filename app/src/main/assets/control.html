@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BeautiEyes 控制台</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container { text-align: center; }
+        h1 { font-size: 2rem; margin-bottom: 2rem; color: #e94560; }
+        #playBtn {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            border: none;
+            background: #e94560;
+            color: white;
+            font-size: 2rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+            box-shadow: 0 8px 30px rgba(233, 69, 96, 0.4);
+        }
+        #playBtn:active { transform: scale(0.95); box-shadow: 0 4px 15px rgba(233, 69, 96, 0.3); }
+        #playBtn:disabled { background: #555; box-shadow: none; cursor: not-allowed; }
+        #msg { margin-top: 1.5rem; font-size: 1.2rem; min-height: 1.5em; }
+        .ok { color: #4ecca3; }
+        .err { color: #e94560; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>BeautiEyes</h1>
+        <button id="playBtn" onclick="play()">播放</button>
+        <div id="msg"></div>
+    </div>
+    <script>
+        async function play() {
+            const btn = document.getElementById('playBtn');
+            const msg = document.getElementById('msg');
+            btn.disabled = true;
+            msg.textContent = '发送中...';
+            msg.className = '';
+            try {
+                const res = await fetch('/play', { method: 'POST' });
+                const data = await res.json();
+                if (data.ok) {
+                    msg.textContent = '已发送播放指令';
+                    msg.className = 'ok';
+                } else {
+                    msg.textContent = '发送失败';
+                    msg.className = 'err';
+                }
+            } catch (e) {
+                msg.textContent = '连接失败: ' + e.message;
+                msg.className = 'err';
+            }
+            setTimeout(() => { btn.disabled = false; }, 1000);
+        }
+    </script>
+</body>
+</html>
