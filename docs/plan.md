@@ -32,7 +32,13 @@ interface SignalSource {
 **任务 1：引入依赖与权限**
 - 添加 NanoHTTPD 依赖
 - 添加 Media3 ExoPlayer 依赖
-- 添加权限（INTERNET、FOREGROUND_SERVICE、RECEIVE_BOOT_COMPLETED）
+- 添加权限：
+  - `INTERNET`
+  - `FOREGROUND_SERVICE`
+  - `FOREGROUND_SERVICE_CONNECTED_DEVICE`（对应 Service 的 `connectedDevice` 类型，Android 14+ 必须）
+  - `RECEIVE_BOOT_COMPLETED`
+  - `USE_FULL_SCREEN_INTENT`（后台弹播放页所需）
+  - `SYSTEM_ALERT_WINDOW`（悬浮窗权限，后台启动 Activity 的兜底）
 
 ### 阶段二：信号源
 
@@ -57,10 +63,16 @@ interface SignalSource {
 ### 阶段四：前台服务与串联
 
 **任务 5：前台服务**
-- 创建 `SignalService`（Foreground Service）
+- 创建 `SignalService`（Foreground Service），`onStartCommand` 返回 `START_STICKY`（被系统杀掉后自动重启）
 - 启动 `HttpSignalSource` 监听信号
-- 收到信号后用 `FLAG_ACTIVITY_NEW_TASK` 拉起 `VideoPlayerActivity`
-- 常驻通知显示服务运行中
+- 创建两个 NotificationChannel：
+  - `beautieyes_signal`（IMPORTANCE_LOW）— 前台服务的常驻通知
+  - `beautieyes_alert`（IMPORTANCE_HIGH）— Full-Screen Intent 使用的高优通道
+- 收到信号后的抢占策略（Android 10+ 后台启 Activity 受限，需要兜底）：
+  - 前台场景：直接 `startActivity`，Flag 为 `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_REORDER_TO_FRONT`
+  - 后台场景：在直接 `startActivity` 之外，再额外发一条带 `setFullScreenIntent` + `CATEGORY_ALARM` + `PRIORITY_MAX` 的通知作为兜底
+  - 配合 `VideoPlayerActivity` 的 `android:showOnLockScreen="true"`、`android:turnScreenOn="true"` 与 `SYSTEM_ALERT_WINDOW` 权限
+- 通过 `Binder` (`LocalBinder`) 暴露 `getSignalSourceStatus()` 给 `MainActivity`
 
 **任务 6：开机自启动**
 - 创建 `BootReceiver`，开机后自动启动 `SignalService`
@@ -69,8 +81,10 @@ interface SignalSource {
 
 **任务 7：主界面**
 - 显示本机 IP 地址和端口（方便用户知道访问地址）
-- 显示信号源状态（运行中/已停止）
-- 启动/停止服务按钮
+- 显示信号源状态（运行中/已停止/异常）
+- `onCreate` 直接 `startForegroundService` 拉起 `SignalService`，并通过 `bindService` 获取状态
+- 悬浮窗权限引导：检查 `Settings.canDrawOverlays`，未授权时显示警告文案与"去授权"按钮（跳转 `ACTION_MANAGE_OVERLAY_PERMISSION`）；`onResume` 回到页面时重新检测权限
+- 备注：启动/停止服务按钮暂未实现，列入 backlog
 
 ## 文件结构（预计新增）
 
@@ -99,7 +113,7 @@ app/src/main/res/raw/
 ## 后续扩展（MQTT）
 
 当需要外网控制时，新增 `MqttSignalSource` 实现 `SignalSource` 接口：
-- 依赖：Eclipse Paho Android
+- 依赖：建议使用 HiveMQ MQTT Client（Eclipse Paho Android Service 已停止维护），或直接使用 Paho Java + 协程自管理生命周期
 - 服务端：Mochi-MQTT 部署到公网
 - Topic：`beautieyes/play`，QoS 1
 - 在 `SignalService` 中替换或并行启动多个信号源即可

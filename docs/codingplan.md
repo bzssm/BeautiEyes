@@ -36,7 +36,10 @@ implementation(libs.media3.ui)
 ```xml
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+<uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+<uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 ```
 
 ---
@@ -80,13 +83,14 @@ interface SignalSource {
 ### 代码要点
 
 **HttpSignalSource.kt**：
+- 构造签名 `HttpSignalSource(context: Context, port: Int = 8080)`，需要 `Context` 读取 `assets/control.html`
 - 继承 `NanoHTTPD(port)` 并实现 `SignalSource` 接口
 - 路由处理：
   - `GET /` → 返回 `control.html`（控制页面）
   - `POST /play` → 调用 `onSignal(SignalCommand("play"))`，返回 JSON `{"ok": true}`
   - `GET /status` → 返回当前状态 JSON
-- `start()` 中调用 `super.start()`，`stop()` 中调用 `super.stop()`
-- 异常处理：端口占用时状态设为 ERROR
+- `start(onSignal)` 中调用 `NanoHTTPD.start(SOCKET_READ_TIMEOUT, false)`；`stop()` 中调用 `super.stop()` 并清空回调
+- 异常处理：`IOException`（端口占用等）时状态设为 ERROR
 
 **control.html**：
 - 简洁的单页面，一个大按钮"播放"
@@ -142,26 +146,53 @@ interface SignalSource {
 **SignalService.kt**：
 - 继承 `Service`，实现前台服务
 - `onCreate` 中：
-  - 创建 NotificationChannel
-  - 创建 `HttpSignalSource(8080)`
+  - 创建两个 NotificationChannel：
+    - `beautieyes_signal`（IMPORTANCE_LOW）— 前台服务常驻通知
+    - `beautieyes_alert`（IMPORTANCE_HIGH）— Full-Screen Intent 使用
+  - 创建 `HttpSignalSource(this, DEFAULT_PORT)`
   - 调用 `signalSource.start { command -> handleCommand(command) }`
   - 调用 `startForeground()` 绑定常驻通知
-- `handleCommand(command)` 中：
-  - 当 `action == "play"` 时，启动 `VideoPlayerActivity`：
-    ```kotlin
-    val intent = Intent(this, VideoPlayerActivity::class.java).apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    startActivity(intent)
-    ```
+- `onStartCommand` 返回 `START_STICKY`（系统杀掉后自动重启）
+- `handleCommand(command)` 中，`action == "play"` 时走 `launchVideoPlayer()`：
+  ```kotlin
+  val intent = Intent(this, VideoPlayerActivity::class.java).apply {
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+  }
+  // 始终尝试直接启动
+  startActivity(intent)
+  // 后台时额外发 Full-Screen Intent 通知作为兜底（Android 10+ 后台启 Activity 受限）
+  if (!isAppInForeground()) {
+      val pendingIntent = PendingIntent.getActivity(
+          this, 0, intent,
+          PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+      )
+      val notification = Notification.Builder(this, ALERT_CHANNEL_ID)
+          .setFullScreenIntent(pendingIntent, true)
+          .setCategory(Notification.CATEGORY_ALARM)
+          .setPriority(Notification.PRIORITY_MAX)
+          // ... title/text/icon
+          .build()
+      notificationManager.notify(ALERT_NOTIFICATION_ID, notification)
+  }
+  ```
 - `onDestroy` 中调用 `signalSource.stop()`
-- 提供 `Binder` 让 `MainActivity` 可以获取连接状态
+- 通过 `LocalBinder` 暴露 `getSignalSourceStatus()` 给 `MainActivity`
 
 **AndroidManifest.xml** — 注册 Service：
 ```xml
 <service
     android:name=".service.SignalService"
     android:foregroundServiceType="connectedDevice" />
+```
+
+**VideoPlayerActivity 需配合的清单属性**（与后台弹播放配套）：
+```xml
+<activity
+    android:name=".VideoPlayerActivity"
+    android:launchMode="singleTask"
+    android:showOnLockScreen="true"
+    android:turnScreenOn="true"
+    android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
 ```
 
 ---
@@ -209,13 +240,18 @@ class BootReceiver : BroadcastReceiver() {
 
 ### 代码要点
 
-- 绑定 `SignalService`，获取信号源状态
-- 获取本机 WiFi IP 地址（`WifiManager` 或遍历 `NetworkInterface`）
+- 绑定 `SignalService`，通过 `LocalBinder.getService().getSignalSourceStatus()` 获取信号源状态
+- 获取本机 WiFi IP 地址（遍历 `NetworkInterface`，取非 loopback 的 IPv4 地址）
+- 悬浮窗权限引导：
+  - `checkOverlayPermission()` 使用 `Settings.canDrawOverlays(this)` 检查
+  - 未授权时 UI 显示警告文案 + "去授权"按钮，点击跳 `ACTION_MANAGE_OVERLAY_PERMISSION`
+  - `onResume` 中重新检查权限（从设置页返回时更新 UI）
 - Compose UI 显示：
   - 大字显示访问地址：`http://192.168.x.x:8080`
-  - 信号源状态指示（运行中 🟢 / 已停止 🔴）
-  - 启动/停止服务按钮
-- `onCreate` 中启动 `SignalService`
+  - 信号源状态指示（运行中 🟢 / 已停止 🔴 / 异常 🔴）
+  - 未授权悬浮窗时的警告与授权入口
+- `onCreate` 中 `startForegroundService(SignalService)` 拉起服务；`onStart`/`onStop` 中 `bindService`/`unbindService`
+- 备注：启动/停止服务按钮未实现，若需要可后续迭代
 
 ---
 
